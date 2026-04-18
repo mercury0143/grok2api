@@ -194,9 +194,28 @@ async def _resolve_image_output(
     blob_b64: str | None = None,
 ) -> _ImageOutput:
     fmt = _normalize_response_format(response_format)
-    if fmt == "url" and not _app_url():
+    cfg = get_config()
+    image_fmt = cfg.get_str("features.image_format", "grok_url")
+
+    # b64_json API param always wins
+    if fmt == "b64_json":
+        mime = infer_content_type(url) or "image/jpeg"
+        if blob_b64 is not None:
+            try:
+                raw = base64.b64decode(blob_b64)
+            except (ValueError, TypeError, binascii.Error) as exc:
+                raise UpstreamError(f"Invalid upstream image blob: {exc}") from exc
+        else:
+            raw, mime = await _download_image_bytes(token, url)
+        b64 = blob_b64 or base64.b64encode(raw).decode()
+        data_uri = f"data:{mime};base64,{b64}"
+        return _ImageOutput(api_value=b64, markdown_value=f"![image]({data_uri})")
+
+    # Formats that don't require downloading
+    if image_fmt in ("grok_url", "grok_md"):
         return _ImageOutput(api_value=url, markdown_value=f"![image]({url})")
 
+    # Download bytes for all remaining formats
     mime = infer_content_type(url) or "image/jpeg"
     if blob_b64 is not None:
         try:
@@ -206,11 +225,26 @@ async def _resolve_image_output(
     else:
         raw, mime = await _download_image_bytes(token, url)
 
-    if fmt == "b64_json":
-        b64 = blob_b64 or base64.b64encode(raw).decode()
+    if image_fmt == "base64":
+        b64 = base64.b64encode(raw).decode()
         data_uri = f"data:{mime};base64,{b64}"
         return _ImageOutput(api_value=b64, markdown_value=f"![image]({data_uri})")
 
+    if image_fmt in ("s3_url", "s3_md"):
+        from app.platform.storage import get_s3_store
+        store = get_s3_store()
+        if store is not None:
+            try:
+                file_id = _extract_image_file_id(url)
+                ext = ".png" if "png" in mime else ".jpg"
+                s3_url = await store.upload(f"images/{file_id}{ext}", raw, mime)
+                return _ImageOutput(api_value=s3_url, markdown_value=f"![image]({s3_url})")
+            except Exception as exc:
+                logger.warning("S3 image upload failed, falling back to local: error={}", exc)
+                if not cfg.get_bool("storage.enable_fallback", True):
+                    raise UpstreamError(f"S3 upload failed: {exc}") from exc
+
+    # local_url / local_md / S3 fallback
     file_id = _save_image(raw, mime, _extract_image_file_id(url))
     local_url = _local_image_url(file_id)
     return _ImageOutput(api_value=local_url, markdown_value=f"![image]({local_url})")

@@ -1,3 +1,25 @@
+# ==================== 存储配置 ====================
+[storage]
+# 存储类型：local（本地）/ s3（S3 兼容，含 Cloudflare R2 / MinIO）
+type = "s3"
+# S3 上传失败时回退到本地存储
+enable_fallback = true
+
+[storage.s3]
+endpoint = "https://35421aedb37bbf6e25656034287f9e45.r2.cloudflarestorage.com"
+region = "us-east-1"
+access_key = "61883218242dee08f369e34966c3d50f"
+secret_key = "79939e99ebb0ccad5496d1a863f3a6ce9e9aee47430b68be5e22350f2ee1e99b"
+bucket = "media"
+# 自定义域名（CDN / R2 公开域名等），留空则用 endpoint 拼接
+custom_domain = "https://r2.geeknow.top"
+# S3 key 前缀
+path_prefix = "grok/"
+upload_timeout = 300
+# true = 返回 S3 直链；false = 走本地代理（local_url 模式下无效）
+use_direct_url = false
+
+
 # ==================== 访问控制 ====================
 [app]
 # 管理后台密码
@@ -45,14 +67,18 @@ custom_instruction = ""
 #   grok_md   — Markdown 内嵌 Grok CDN URL
 #   local_md  — Markdown 内嵌本地代理 URL
 #   base64    — Markdown 内嵌 Base64 Data URI
-image_format = "grok_url"
+#   s3_url    — 上传到 S3，返回 S3 公开 URL
+#   s3_md     — Markdown 内嵌 S3 公开 URL
+image_format = "s3_md"
 
 # 视频返回格式
 #   grok_url  — 直接返回 Grok CDN URL
 #   local_url — 下载后存本地，返回本地代理 URL
 #   grok_html — HTML <video> 标签，src 为 Grok CDN URL
 #   local_html — HTML <video> 标签，src 为本地代理 URL
-video_format = "grok_url"
+#   s3_url     — 上传到 S3，返回 S3 公开 URL
+#   s3_html    — HTML <video> 标签，src 为 S3 公开 URL
+video_format = "s3_html"
 
 
 # ==================== 代理配置 ====================

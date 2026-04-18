@@ -176,9 +176,10 @@ def _resolve_profile(lease: ProxyLease | None) -> tuple[str, str]:
 
 
 def _resolve_browser(lease: ProxyLease | None) -> str:
+    from app.dataplane.proxy.adapters.session import _clamp_chrome
     if lease is not None and lease.user_agent:
         m = re.search(r"Chrome/(\d+)", lease.user_agent)
-        return f"chrome{m.group(1)}" if m else "chrome120"
+        return _clamp_chrome(int(m.group(1))) if m else "chrome120"
     return get_config().get_str("proxy.clearance.browser", "chrome120")
 
 

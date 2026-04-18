@@ -504,9 +504,9 @@ def _local_video_url(file_id: str) -> str:
 
 def _normalize_video_format(value: str | None) -> str:
     fmt = (value or "grok_url").strip().lower()
-    if fmt not in {"grok_url", "local_url", "grok_html", "local_html"}:
+    if fmt not in {"grok_url", "local_url", "grok_html", "local_html", "s3_url", "s3_html"}:
         raise ValidationError(
-            "video_format must be one of [grok_url, local_url, grok_html, local_html]",
+            "video_format must be one of [grok_url, local_url, grok_html, local_html, s3_url, s3_html]",
             param="features.video_format",
         )
     return fmt
@@ -518,11 +518,26 @@ def _render_video_html(url: str) -> str:
 
 
 async def _resolve_video_output(*, token: str, url: str, file_id: str) -> str:
-    fmt = _normalize_video_format(get_config().get_str("features.video_format", "grok_url"))
+    cfg = get_config()
+    fmt = _normalize_video_format(cfg.get_str("features.video_format", "grok_url"))
     if fmt == "grok_url":
         return url
     if fmt == "grok_html":
         return _render_video_html(url)
+
+    if fmt in ("s3_url", "s3_html"):
+        from app.platform.storage import get_s3_store
+        store = get_s3_store()
+        if store is not None:
+            try:
+                raw, _mime = await _download_video_bytes(token, url)
+                s3_url = await store.upload(f"videos/{file_id}.mp4", raw, "video/mp4")
+                return s3_url if fmt == "s3_url" else _render_video_html(s3_url)
+            except Exception as exc:
+                logger.warning("S3 video upload failed, falling back to local: error={}", exc)
+                if not cfg.get_bool("storage.enable_fallback", True):
+                    raise UpstreamError(f"S3 upload failed: {exc}") from exc
+        return url if fmt == "s3_url" else _render_video_html(url)
 
     try:
         raw, _mime = await _download_video_bytes(token, url)
@@ -785,11 +800,24 @@ async def _run_video_job(
                 asyncio.create_task(_fail_sync(token, int(spec.mode_id), fail_exc))
 
         path = _save_video_bytes(raw, job.id)
+        final_video_url = artifact.video_url
+        cfg = get_config()
+        fmt = _normalize_video_format(cfg.get_str("features.video_format", "grok_url"))
+        if fmt in ("s3_url", "s3_html"):
+            from app.platform.storage import get_s3_store
+            store = get_s3_store()
+            if store is not None:
+                try:
+                    s3_url = await store.upload(f"videos/{job.id}.mp4", raw, "video/mp4")
+                    final_video_url = s3_url
+                    path.unlink(missing_ok=True)
+                except Exception as exc:
+                    logger.warning("S3 video job upload failed, keeping local: error={}", exc)
         async with _VIDEO_JOBS_LOCK:
             job.status = "completed"
             job.progress = 100
             job.completed_at = int(time.time())
-            job.video_url = artifact.video_url
+            job.video_url = final_video_url
             job.content_path = str(path)
             job.remixed_from_video_id = artifact.remixed_from_video_id
     except Exception as exc:

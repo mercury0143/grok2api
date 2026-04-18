@@ -214,6 +214,10 @@ async def lifespan(app: FastAPI):
     if is_leader:
         proxy_scheduler.start()
 
+    # Initialise S3 storage (no-op when storage.type = "local").
+    from app.platform.storage import init_s3_store
+    init_s3_store(_config)
+
     logger.info("application startup completed")
     yield
 

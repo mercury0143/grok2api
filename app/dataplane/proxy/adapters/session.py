@@ -1,21 +1,34 @@
 """curl_cffi session builder for reverse-proxy requests."""
 
 import asyncio
+import re
 from typing import Any
 from urllib.parse import urlparse
 
 from curl_cffi.const import CurlOpt
+from curl_cffi.requests import BrowserType
 
 from app.platform.config.snapshot import get_config
 from app.control.proxy.models import ProxyLease
 
+_CHROME_VERSIONS: list[int] = sorted(
+    int(re.fullmatch(r"chrome(\d+)", b.value).group(1))
+    for b in BrowserType
+    if re.fullmatch(r"chrome(\d+)", b.value)
+)
+
+
+def _clamp_chrome(version: int) -> str:
+    for v in reversed(_CHROME_VERSIONS):
+        if version >= v:
+            return f"chrome{v}"
+    return f"chrome{_CHROME_VERSIONS[0]}"
+
 
 def _resolve_browser(lease: ProxyLease | None) -> str:
     if lease is not None and lease.user_agent:
-        from urllib.parse import urlparse
-        import re
         m = re.search(r"Chrome/(\d+)", lease.user_agent)
-        return f"chrome{m.group(1)}" if m else "chrome120"
+        return _clamp_chrome(int(m.group(1))) if m else "chrome120"
     return get_config().get_str("proxy.clearance.browser", "chrome120")
 
 
