@@ -176,16 +176,36 @@ async def admin_verify():
 
 @router.get("/config", tags=[_TAG_ADMIN_SYSTEM])
 async def get_config_endpoint():
+    raw = config.raw()
+    try:
+        if raw.get("storage", {}).get("s3", {}).get("secret_key"):
+            raw["storage"]["s3"]["secret_key"] = "***"
+    except Exception:
+        pass
     return Response(
-        content=orjson.dumps(config.raw()),
+        content=orjson.dumps(raw),
         media_type="application/json",
     )
+
+
+def _strip_masked_secrets(patch: dict[str, Any]) -> dict[str, Any]:
+    """Remove secret_key from patch if it is the masked sentinel value."""
+    storage = patch.get("storage")
+    if not isinstance(storage, dict):
+        return patch
+    s3 = storage.get("s3")
+    if not isinstance(s3, dict) or s3.get("secret_key") != "***":
+        return patch
+    s3 = {k: v for k, v in s3.items() if k != "secret_key"}
+    return {**patch, "storage": {**storage, "s3": s3}}
 
 
 @router.post("/config", tags=[_TAG_ADMIN_SYSTEM])
 async def update_config(req: ConfigPatchRequest):
     patch = _sanitize_proxy_config(req.root)
+    patch = _strip_masked_secrets(patch)
     _ensure_runtime_patch_allowed(patch)
+    storage_changed = "storage" in patch
     await config.update(patch)
     # config.update() only writes to the backend and invalidates the in-memory
     # snapshot (_version = None); it does not refresh the data.  load() is
@@ -195,7 +215,23 @@ async def update_config(req: ConfigPatchRequest):
         file_level=config.get_str("logging.file_level", "") or None,
         max_files=config.get_int("logging.max_files", 7),
     )
+    if storage_changed:
+        from app.platform.storage.s3_store import init_s3_store
+        init_s3_store(config)
     return {"status": "success", "message": "配置已更新"}
+
+
+@router.post("/storage/test", tags=[_TAG_ADMIN_SYSTEM])
+async def test_storage_connection():
+    from app.platform.storage.s3_store import get_s3_store
+    store = get_s3_store()
+    if not store:
+        return {"status": "error", "message": "S3 存储未启用，请先将存储类型设为 s3 并保存配置"}
+    try:
+        await store.upload("__health__/test.txt", b"grok2api-s3-test", "text/plain")
+        return {"status": "success", "message": "S3 连接正常"}
+    except Exception as e:
+        return {"status": "error", "message": f"连接失败: {e}"}
 
 
 @router.get("/storage", tags=[_TAG_ADMIN_SYSTEM])

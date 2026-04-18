@@ -403,8 +403,10 @@ const SCHEMA_DEF = [
               { value: 'grok_md', label: 'Markdown（Grok 原生）', labelKey: 'config.schema.options.imageFormat.grokMarkdown' },
               { value: 'local_md', label: 'Markdown（本地代理）', labelKey: 'config.schema.options.imageFormat.localMarkdown', disabledWhen: 'no_app_url', disabledTip: '请先填写 APP 访问地址', disabledTipKey: 'config.disabledTip.appUrlRequired' },
               { value: 'base64', label: 'Base64（内嵌）', labelKey: 'config.schema.options.imageFormat.base64' },
+              { value: 's3_url', label: 'URL（S3）', disabledWhen: 'no_s3', disabledTip: '请先在 S3 存储 页启用 S3' },
+              { value: 's3_md', label: 'Markdown（S3）', disabledWhen: 'no_s3', disabledTip: '请先在 S3 存储 页启用 S3' },
             ],
-            desc: 'grok_url / grok_md 直接返回 Grok CDN 地址，客户端需具备 CDN 访问能力；local_* 模式会先下载到服务端，再通过本地 URL 代理分发；base64 会以内嵌 Data URI 返回。',
+            desc: 'grok_url / grok_md 直接返回 Grok CDN 地址，客户端需具备 CDN 访问能力；local_* 模式会先下载到服务端，再通过本地 URL 代理分发；base64 会以内嵌 Data URI 返回；s3_* 模式上传至 S3 存储。',
             descKey: 'config.schema.fields.imageFormat.desc',
           },
           {
@@ -417,6 +419,8 @@ const SCHEMA_DEF = [
               { value: 'local_url', label: 'URL（本地代理）', labelKey: 'config.schema.options.videoFormat.localUrl', disabledWhen: 'no_app_url', disabledTip: '请先填写 APP 访问地址', disabledTipKey: 'config.disabledTip.appUrlRequired' },
               { value: 'grok_html', label: 'HTML（Grok 原生）', labelKey: 'config.schema.options.videoFormat.grokHtml' },
               { value: 'local_html', label: 'HTML（本地代理）', labelKey: 'config.schema.options.videoFormat.localHtml', disabledWhen: 'no_app_url', disabledTip: '请先填写 APP 访问地址', disabledTipKey: 'config.disabledTip.appUrlRequired' },
+              { value: 's3_url', label: 'URL（S3）', disabledWhen: 'no_s3', disabledTip: '请先在 S3 存储 页启用 S3' },
+              { value: 's3_html', label: 'HTML（S3）', disabledWhen: 'no_s3', disabledTip: '请先在 S3 存储 页启用 S3' },
             ],
             desc: 'local_* 模式会先将视频下载至服务端，再通过本地 URL 代理分发；请确保已配置 APP 访问地址，并评估出站带宽消耗。',
             descKey: 'config.schema.fields.videoFormat.desc',
@@ -598,7 +602,7 @@ const SCHEMA_DEF = [
         ]
       },
       {
-        title: '重试策略', titleKey: 'config.schema.groups.retry',
+        title: '重试与超时', titleKey: 'config.schema.groups.retry',
         section: 'retry',
         fields: [
           { key: 'max_retries', label: '应用层重试上限', labelKey: 'config.schema.fields.maxRetries.label', type: 'number', desc: '请求失败后的应用层最大重试次数；0 表示不重试。适用于 chat.completions 与 responses 端点。', descKey: 'config.schema.fields.maxRetries.desc' },
@@ -620,6 +624,85 @@ const SCHEMA_DEF = [
           { key: 'download_timeout', section: 'asset', label: '资产下载超时（秒）', labelKey: 'config.schema.fields.assetDownloadTimeout.label', type: 'number', desc: 'Asset 下载接口的超时时间。', descKey: 'config.schema.fields.assetDownloadTimeout.desc' },
           { key: 'list_timeout', section: 'asset', label: '资产查询超时（秒）', labelKey: 'config.schema.fields.assetListTimeout.label', type: 'number', desc: 'Asset 查询接口的超时时间。', descKey: 'config.schema.fields.assetListTimeout.desc' },
           { key: 'delete_timeout', section: 'asset', label: '资产删除超时（秒）', labelKey: 'config.schema.fields.assetDeleteTimeout.label', type: 'number', desc: 'Asset 删除接口的超时时间。', descKey: 'config.schema.fields.assetDeleteTimeout.desc' },
+        ]
+      },
+    ]
+  },
+  {
+    id: 'storage', label: 'S3 存储',
+    groups: [
+      {
+        title: '存储设置',
+        section: 'storage',
+        fields: [
+          {
+            key: 'type',
+            label: '存储类型',
+            type: 'select',
+            options: [
+              { value: 'local', label: '本地存储' },
+              { value: 's3', label: 'S3 / R2 / MinIO' },
+            ],
+            desc: '选择媒体文件（图片/视频）的存储后端。local 保存到服务器本地磁盘；s3 上传至 S3 兼容存储（含 Cloudflare R2、MinIO 等）。',
+          },
+          {
+            key: 'enable_fallback',
+            label: 'S3 失败时回退本地',
+            type: 'bool',
+            desc: '启用后，若 S3 上传失败则自动将文件保存到本地存储，确保图片/视频仍可返回。',
+            showIf: { path: 'storage.type', values: ['s3'] },
+          },
+        ]
+      },
+      {
+        title: 'S3 连接参数',
+        section: 'storage.s3',
+        fields: [
+          {
+            key: 'endpoint', label: 'Endpoint', type: 'text', wide: true,
+            desc: 'S3 兼容服务端点，例如 https://xxx.r2.cloudflarestorage.com 或 http://minio:9000。',
+            showIf: { path: 'storage.type', values: ['s3'] },
+          },
+          {
+            key: 'region', label: 'Region', type: 'text',
+            desc: '存储区域标识，AWS S3 如 us-east-1；Cloudflare R2 / MinIO 等填任意值即可。',
+            showIf: { path: 'storage.type', values: ['s3'] },
+          },
+          {
+            key: 'access_key', label: 'Access Key ID', type: 'text',
+            desc: 'S3 访问密钥 ID（AK）。',
+            showIf: { path: 'storage.type', values: ['s3'] },
+          },
+          {
+            key: 'secret_key', label: 'Secret Access Key', type: 'password',
+            desc: '当前值已隐藏；直接保存不填或保持 *** 将不覆盖原始密钥。',
+            showIf: { path: 'storage.type', values: ['s3'] },
+          },
+          {
+            key: 'bucket', label: 'Bucket', type: 'text',
+            desc: 'S3 存储桶名称。',
+            showIf: { path: 'storage.type', values: ['s3'] },
+          },
+          {
+            key: 'custom_domain', label: '自定义域名 (CDN)', type: 'text', wide: true,
+            desc: '公开访问 URL 的根域名，如 https://cdn.example.com。留空则用 endpoint + bucket 拼接。',
+            showIf: { path: 'storage.type', values: ['s3'] },
+          },
+          {
+            key: 'path_prefix', label: '路径前缀', type: 'text',
+            desc: '上传文件的 Key 前缀，例如 grok/。留空则放在存储桶根目录。',
+            showIf: { path: 'storage.type', values: ['s3'] },
+          },
+          {
+            key: 'upload_timeout', label: '上传超时（秒）', type: 'number',
+            desc: 'S3 上传请求的最长等待时间，默认 300 秒。',
+            showIf: { path: 'storage.type', values: ['s3'] },
+          },
+          {
+            key: 'use_direct_url', label: '返回 S3 直链', type: 'bool',
+            desc: '启用后图片/视频 URL 直接指向 S3 地址；禁用时走本地代理转发（需配置 APP 访问地址）。',
+            showIf: { path: 'storage.type', values: ['s3'] },
+          },
         ]
       },
     ]
@@ -664,6 +747,7 @@ function _showIfPaths(showIf) {
 
 function _disabledWhenPaths(condition) {
   if (condition === 'no_app_url') return ['app.app_url'];
+  if (condition === 'no_s3') return ['storage.type'];
   return [];
 }
 
@@ -781,6 +865,10 @@ function _evalDisabledWhen(condition) {
   if (condition === 'no_app_url') {
     const v = 'app.app_url' in _dirty ? _dirty['app.app_url'] : _getByPath(_cfg, 'app.app_url');
     return !v || String(v).trim() === '';
+  }
+  if (condition === 'no_s3') {
+    const v = 'storage.type' in _dirty ? _dirty['storage.type'] : _getByPath(_cfg, 'storage.type');
+    return v !== 's3';
   }
   return false;
 }
@@ -976,10 +1064,30 @@ function renderGroup(group, tabId) {
   return wrap;
 }
 
+function renderStorageTestSection() {
+  const testBtn = _el('button', {
+    class: 'page-action-btn page-action-btn-primary',
+    id: 'btn-storage-test',
+    type: 'button',
+    style: 'flex-shrink:0',
+    onclick: doTestStorage,
+  }, '测试连接');
+  const resultEl = _el('span', { id: 'storage-test-result', style: 'font-size:13px;color:#9a9a9a' });
+  const labelCol = _el('div', { class: 'cfg-label-col' },
+    _el('div', { class: 'cfg-label' }, '连通性测试'),
+    _el('div', { class: 'cfg-desc' }, '保存配置后点击"测试连接"，验证 S3 服务是否可正常上传文件。'),
+  );
+  const inputCol = _el('div', { class: 'cfg-input-col', style: 'gap:12px' }, testBtn, resultEl);
+  const row = _el('div', { class: 'cfg-row' }, labelCol, inputCol);
+  const title = _el('div', { class: 'cfg-group-title' }, '连通性测试');
+  return _el('div', { class: 'cfg-group' }, title, row);
+}
+
 function renderPanel(tab) {
   const panel = _el('div', { class: `cfg-panel${tab.id === _activeTab ? ' active' : ''}`,
     id: `panel-${tab.id}` });
   tab.groups.forEach(g => panel.appendChild(renderGroup(g, tab.id)));
+  if (tab.id === 'storage') panel.appendChild(renderStorageTestSection());
   return panel;
 }
 
@@ -1118,6 +1226,31 @@ function doReset() {
   renderAll();
   _refreshDirtyState({ autoNormalizeSelects: false });
   showToast(tr('config.resetSuccess', null, '未保存的更改已撤销'), 'info');
+}
+
+// ── S3 Test ───────────────────────────────────────────────────────────────
+async function doTestStorage() {
+  const btn = document.getElementById('btn-storage-test');
+  const resultEl = document.getElementById('storage-test-result');
+  if (!btn || !resultEl) return;
+  btn.disabled = true;
+  resultEl.textContent = '测试中…';
+  resultEl.style.color = '#9a9a9a';
+  try {
+    const data = await _api('POST', '/storage/test', {});
+    if (data.status === 'success') {
+      resultEl.textContent = '✓ ' + (data.message || '连接成功');
+      resultEl.style.color = '#22c55e';
+    } else {
+      resultEl.textContent = '✗ ' + (data.message || '连接失败');
+      resultEl.style.color = '#ef4444';
+    }
+  } catch (e) {
+    resultEl.textContent = '✗ ' + e.message;
+    resultEl.style.color = '#ef4444';
+  } finally {
+    btn.disabled = false;
+  }
 }
 
 // ── Boot ──────────────────────────────────────────────────────────────────
