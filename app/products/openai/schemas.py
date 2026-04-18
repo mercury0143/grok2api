@@ -43,9 +43,10 @@ class ChatCompletionRequest(BaseModel):
 
 
 class VideoExtendRequest(BaseModel):
-    model:          str
-    prompt:         str
-    video_post_id:  str
+    model:            str
+    prompt:           str
+    video_post_id:    str
+    original_seconds: int = 6
 
 
 class ImageGenerationRequest(BaseModel):

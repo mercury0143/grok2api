@@ -75,6 +75,7 @@ class _VideoArtifact:
     asset_id: str
     thumbnail_url: str
     remixed_from_video_id: str | None = None
+    parent_post_id: str = ""
 
 
 @dataclass(slots=True)
@@ -99,6 +100,8 @@ class _VideoJob:
     remixed_from_video_id: str | None = None
     video_url: str = ""
     content_path: str = ""
+    grok_video_post_id: str = ""
+    grok_parent_post_id: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         payload: dict[str, Any] = {
@@ -121,6 +124,8 @@ class _VideoJob:
             payload["remixed_from_video_id"] = self.remixed_from_video_id
         if self.video_url:
             payload["video_url"] = self.video_url
+        if self.grok_video_post_id:
+            payload["grok_video_post_id"] = self.grok_video_post_id
         return payload
 
 
@@ -334,7 +339,16 @@ async def _stream_video_request(
             stream=True,
         )
         if response.status_code != 200:
-            body = response.content.decode("utf-8", "replace")[:300]
+            try:
+                raw = await response.aread()
+                body = raw.decode("utf-8", "replace")[:500]
+            except Exception:
+                body = ""
+            logger.warning(
+                "video upstream {} body={} payload={}",
+                response.status_code, body,
+                orjson.dumps(payload).decode()[:2000],
+            )
             raise UpstreamError(
                 f"Video upstream returned {response.status_code}",
                 status=response.status_code,
@@ -634,6 +648,7 @@ async def _generate_video_with_token(
 
     if artifact is None:
         raise UpstreamError("Video generation returned no artifact")
+    artifact.parent_post_id = parent_post_id
     return artifact
 
 
@@ -824,6 +839,8 @@ async def _run_video_job(
             job.video_url = final_video_url
             job.content_path = final_content_path
             job.remixed_from_video_id = artifact.remixed_from_video_id
+            job.grok_video_post_id = artifact.video_post_id
+            job.grok_parent_post_id = artifact.parent_post_id
     except Exception as exc:
         logger.exception("video job failed: job_id={} error={}", job.id, exc)
         async with _VIDEO_JOBS_LOCK:
@@ -837,6 +854,7 @@ async def _run_video_extend_job(
     video_post_id: str,
     prompt: str,
     seconds: int,
+    original_seconds: int,
     aspect_ratio: str,
     resolution_name: str,
     preset: str,
@@ -864,20 +882,48 @@ async def _run_video_extend_job(
             cfg = get_config()
             timeout_s = cfg.get_float("video.timeout", 180.0)
 
+            # Resolve grok-side IDs: look up local job first, then fall back to
+            # treating video_post_id as a raw Grok videoPostId with a fresh parent.
+            async with _VIDEO_JOBS_LOCK:
+                src_job = _VIDEO_JOBS.get(video_post_id)
+            if src_job is not None and src_job.grok_video_post_id and src_job.grok_parent_post_id:
+                grok_video_post_id = src_job.grok_video_post_id
+                parent_post_id = src_job.grok_parent_post_id
+            else:
+                grok_video_post_id = video_post_id
+                post = await create_media_post(
+                    token,
+                    media_type=_VIDEO_MEDIA_TYPE,
+                    prompt=prompt,
+                    referer="https://grok.com/imagine",
+                )
+                post_data = post.get("post")
+                if not isinstance(post_data, dict):
+                    raise UpstreamError("Video extend create-post returned no post payload")
+                parent_post_id = str(post_data.get("id") or "").strip()
+                if not parent_post_id:
+                    raise UpstreamError("Video extend create-post returned no post id")
+
             async def _progress(progress: int) -> None:
                 await _set_job_status(job, status="in_progress", progress=max(1, progress))
 
             payload = _video_extend_payload(
                 prompt=prompt,
-                parent_post_id=video_post_id,
-                extend_post_id=video_post_id,
+                parent_post_id=parent_post_id,
+                extend_post_id=grok_video_post_id,
                 aspect_ratio=aspect_ratio,
                 resolution_name=resolution_name,
                 video_length=seconds,
                 preset=preset,
-                start_time_s=_video_extend_start_time(seconds),
+                start_time_s=_video_extend_start_time(original_seconds),
             )
-            referer = f"https://grok.com/imagine/post/{video_post_id}"
+            referer = f"https://grok.com/imagine/post/{parent_post_id}"
+            logger.debug(
+                "video extend: parent_post_id={} extend_post_id={} start_time_s={} aspect={} length={}",
+                parent_post_id, video_post_id,
+                _video_extend_start_time(original_seconds),
+                aspect_ratio, seconds,
+            )
             artifact = await _collect_video_segment(
                 token=token,
                 payload=payload,
@@ -921,8 +967,11 @@ async def _run_video_extend_job(
             job.completed_at = int(time.time())
             job.video_url = final_video_url
             job.content_path = final_content_path
+            job.grok_video_post_id = artifact.video_post_id
+            job.grok_parent_post_id = parent_post_id
     except Exception as exc:
-        logger.exception("video extend job failed: job_id={} error={}", job.id, exc)
+        body = getattr(exc, "details", {}).get("body", "") if hasattr(exc, "details") else ""
+        logger.exception("video extend job failed: job_id={} error={} body={}", job.id, exc, body)
         async with _VIDEO_JOBS_LOCK:
             job.status = "failed"
             job.error = _job_error_payload(str(exc))
@@ -973,6 +1022,7 @@ async def extend_video(
             video_post_id=cleaned_post_id,
             prompt=cleaned_prompt,
             seconds=seconds,
+            original_seconds=original_seconds,
             aspect_ratio=aspect_ratio,
             resolution_name=resolved_resolution_name,
             preset=resolved_preset,
