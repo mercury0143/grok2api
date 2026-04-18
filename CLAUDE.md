@@ -128,10 +128,24 @@ Grok2API 是一个 FastAPI 网关，将 Grok Web 能力以 OpenAI 兼容和 Anth
 | `aspect_ratio` | string | — | 画面比例：`2:3`、`3:2`、`1:1`、`9:16`、`16:9`、`4:3`、`3:4`；默认 `9:16` |
 | `size` | string | — | 画质：`480P`、`720P`、`1080P`；默认 `720P` |
 | `seconds` | int | — | 视频时长；`grok-video-3` 固定 6s、`grok-video-3-10s` 固定 10s（传值无效） |
-| `input_reference` | file | — | 参考图（二进制文件上传） |
+| `input_reference` | file | — | 参考图（可多张，multipart 重复字段）；prompt 中用 `@img1`/`@img2` 占位 |
 | `preset` | string | — | 风格：`fun`、`normal`、`spicy`、`custom`；默认 `custom` |
 
 `_ASPECT_RATIO_MAP`（`video.py`）：`2:3→2:3`、`3:2→3:2`、`1:1→1:1`、`9:16→9:16`、`16:9→16:9`、`4:3→16:9`、`3:4→9:16`
+
+### 参考图（`input_reference`）实现机制
+
+上传图片后，内部流程与 Grok web app 保持一致：
+
+1. 每张图上传后获得 `content_url`（格式：`https://assets.grok.com/users/{uid}/{assetId}/content`）
+2. `@img1`/`@img2`（或 `@图片1`/`@图片2`）替换为 `@{assetId}`（不是完整 URL）
+3. 替换后的 prompt 同时用于：VIDEO media post create 的 `prompt` 字段 和 chat 请求的 `message` 字段
+4. chat 请求的 `videoGenModelConfig` 增加：
+   - `isReferenceToVideo: true`
+   - `imageReferences: [contentUrl1, contentUrl2, ...]`
+5. chat 请求**不使用** `fileAttachments`
+
+关键：`parentPostId` 必须是 `MEDIA_POST_TYPE_VIDEO` 类型的 post（无论是否有参考图），否则 Grok 会从图片尺寸推断宽高比，导致 `aspectRatio` 参数失效。
 
 ## 配置
 
