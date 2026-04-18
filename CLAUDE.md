@@ -73,6 +73,44 @@ Grok2API 是一个 FastAPI 网关，将 Grok Web 能力以 OpenAI 兼容和 Anth
 | `app/platform/config/snapshot.py` | 不可变配置视图、变更检测 |
 | `config.defaults.toml` | 所有默认配置值 |
 
+## 模型列表
+
+完整列表见 `app/control/model/registry.py`。
+
+### Chat
+
+| 模型名 | 模式 | 账号层级 |
+|--------|------|----------|
+| `grok-4.20-0309-non-reasoning` | fast | basic+ |
+| `grok-4.20-0309` | auto | basic+ |
+| `grok-4.20-0309-reasoning` | expert | basic+ |
+| `grok-4.20-0309-non-reasoning-super` | fast | super+ |
+| `grok-4.20-0309-super` | auto | super+ |
+| `grok-4.20-0309-reasoning-super` | expert | super+ |
+| `grok-4.20-0309-non-reasoning-heavy` | fast | heavy+ |
+| `grok-4.20-0309-heavy` | auto | heavy+ |
+| `grok-4.20-0309-reasoning-heavy` | expert | heavy+ |
+| `grok-4.20-multi-agent-0309` | heavy | heavy+ |
+| `grok-4.20-fast` | fast | basic+（优先选最高层级账号） |
+| `grok-4.20-auto` | auto | basic+（优先选最高层级账号） |
+| `grok-4.20-expert` | expert | basic+（优先选最高层级账号） |
+| `grok-4.20-heavy` | heavy | heavy+（优先选最高层级账号） |
+
+### Image
+
+| 模型名 | 账号层级 | 说明 |
+|--------|----------|------|
+| `grok-imagine-image-lite` | basic+ | 轻量图像生成 |
+| `grok-imagine-image` | super+ | 标准图像生成 |
+| `grok-imagine-image-pro` | super+ | 高质量图像生成 |
+| `grok-imagine-image-edit` | super+ | 图像编辑 |
+
+### Video
+
+| 模型名 | 账号层级 | 说明 |
+|--------|----------|------|
+| `grok-imagine-video` | super+ | 视频生成 / 视频拓展 |
+
 ## 配置
 
 运行时配置位于 `${DATA_DIR}/config.toml`（默认 `./data/config.toml`）。主要配置节：`app`、`features`、`proxy`、`retry`、`account.refresh`、`chat`/`image`/`video` 超时。

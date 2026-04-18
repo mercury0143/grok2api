@@ -827,6 +827,154 @@ async def _run_video_job(
             job.error = _job_error_payload(str(exc))
 
 
+async def _run_video_extend_job(
+    job: _VideoJob,
+    *,
+    video_post_id: str,
+    prompt: str,
+    seconds: int,
+    aspect_ratio: str,
+    resolution_name: str,
+    preset: str,
+) -> None:
+    try:
+        await _set_job_status(job, status="in_progress", progress=1)
+        spec = resolve_model(job.model)
+
+        from app.dataplane.account import _directory as _acct_dir
+        if _acct_dir is None:
+            raise RateLimitError("Account directory not initialised")
+
+        acct = await _acct_dir.reserve(
+            pool_candidates=spec.pool_candidates(),
+            mode_id=int(spec.mode_id),
+            now_s_override=now_s(),
+        )
+        if acct is None:
+            raise RateLimitError("No available accounts for video generation")
+
+        token = acct.token
+        success = False
+        fail_exc: BaseException | None = None
+        try:
+            cfg = get_config()
+            timeout_s = cfg.get_float("video.timeout", 180.0)
+
+            async def _progress(progress: int) -> None:
+                await _set_job_status(job, status="in_progress", progress=max(1, progress))
+
+            payload = _video_extend_payload(
+                prompt=prompt,
+                parent_post_id=video_post_id,
+                extend_post_id=video_post_id,
+                aspect_ratio=aspect_ratio,
+                resolution_name=resolution_name,
+                video_length=seconds,
+                preset=preset,
+                start_time_s=_video_extend_start_time(seconds),
+            )
+            referer = f"https://grok.com/imagine/post/{video_post_id}"
+            artifact = await _collect_video_segment(
+                token=token,
+                payload=payload,
+                referer=referer,
+                timeout_s=timeout_s,
+                progress_cb=_progress,
+            )
+            raw, _mime = await _download_video_bytes(token, artifact.video_url)
+            success = True
+        except BaseException as exc:
+            fail_exc = exc
+            raise
+        finally:
+            await _acct_dir.release(acct)
+            kind = FeedbackKind.SUCCESS if success else _feedback_kind(fail_exc) if fail_exc else FeedbackKind.SERVER_ERROR
+            await _acct_dir.feedback(token, kind, int(spec.mode_id))
+            if success:
+                asyncio.create_task(_quota_sync(token, int(spec.mode_id)))
+            else:
+                asyncio.create_task(_fail_sync(token, int(spec.mode_id), fail_exc))
+
+        path = _save_video_bytes(raw, job.id)
+        final_video_url = artifact.video_url
+        cfg = get_config()
+        fmt = _normalize_video_format(cfg.get_str("features.video_format", "grok_url"))
+        if fmt in ("s3_url", "s3_html"):
+            from app.platform.storage import get_s3_store
+            store = get_s3_store()
+            if store is not None:
+                try:
+                    s3_url = await store.upload(f"videos/{job.id}.mp4", raw, "video/mp4")
+                    final_video_url = s3_url
+                    path.unlink(missing_ok=True)
+                except Exception as exc:
+                    logger.warning("S3 video extend job upload failed, keeping local: error={}", exc)
+        async with _VIDEO_JOBS_LOCK:
+            job.status = "completed"
+            job.progress = 100
+            job.completed_at = int(time.time())
+            job.video_url = final_video_url
+            job.content_path = str(path)
+    except Exception as exc:
+        logger.exception("video extend job failed: job_id={} error={}", job.id, exc)
+        async with _VIDEO_JOBS_LOCK:
+            job.status = "failed"
+            job.error = _job_error_payload(str(exc))
+
+
+async def extend_video(
+    *,
+    model: str,
+    prompt: str,
+    video_post_id: str,
+    seconds: int = 6,
+    size: str = "1280x720",
+    resolution_name: str | None = None,
+    preset: str | None = None,
+) -> dict[str, Any]:
+    spec = model_registry.get(model)
+    if spec is None or not spec.enabled or not spec.is_video():
+        raise ValidationError(f"Model {model!r} is not a video model", param="model")
+
+    cleaned_prompt = (prompt or "").strip()
+    if not cleaned_prompt:
+        raise ValidationError("prompt cannot be empty", param="prompt")
+
+    cleaned_post_id = (video_post_id or "").strip()
+    if not cleaned_post_id:
+        raise ValidationError("video_post_id cannot be empty", param="video_post_id")
+
+    validate_video_length(seconds)
+    normalized_size = (size or "1280x720").strip()
+    aspect_ratio, default_resolution_name = _resolve_video_size(normalized_size)
+    resolved_resolution_name = _resolve_video_resolution_name(resolution_name, default=default_resolution_name)
+    resolved_preset = _resolve_video_preset(preset)
+
+    job = _VideoJob(
+        id=f"video_{uuid.uuid4().hex}",
+        model=model,
+        prompt=cleaned_prompt,
+        seconds=str(seconds),
+        size=normalized_size,
+        quality=_VIDEO_QUALITY,
+        created_at=int(time.time()),
+    )
+    await _put_video_job(job)
+    asyncio.create_task(
+        _run_video_extend_job(
+            job,
+            video_post_id=cleaned_post_id,
+            prompt=cleaned_prompt,
+            seconds=seconds,
+            aspect_ratio=aspect_ratio,
+            resolution_name=resolved_resolution_name,
+            preset=resolved_preset,
+        )
+    )
+    asyncio.create_task(_expire_video_job(job.id))
+    return job.to_dict()
+
+
 async def create_video(
     *,
     model: str,
@@ -1042,6 +1190,7 @@ async def completions(
 
 __all__ = [
     "create_video",
+    "extend_video",
     "retrieve",
     "content_path",
     "validate_video_length",

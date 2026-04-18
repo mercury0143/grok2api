@@ -20,6 +20,7 @@ from .schemas import (
     ChatCompletionRequest,
     ImageGenerationRequest,
     VideoConfig,
+    VideoExtendRequest,
     ImageConfig,
     ResponsesCreateRequest,
 )
@@ -417,6 +418,17 @@ async def videos_create(
         resolution_name=resolution_name,
         preset=preset,
         input_reference=reference_payload,
+    )
+    return JSONResponse(result)
+
+
+@router.post("/videos/extend", tags=[_TAG_VIDEOS], dependencies=[Depends(verify_api_key)])
+async def videos_extend(body: VideoExtendRequest):
+    from .video import extend_video
+    result = await extend_video(
+        model=body.model,
+        prompt=body.prompt,
+        video_post_id=body.video_post_id,
     )
     return JSONResponse(result)
 

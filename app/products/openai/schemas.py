@@ -42,6 +42,12 @@ class ChatCompletionRequest(BaseModel):
     max_tokens:          int | None                 = None
 
 
+class VideoExtendRequest(BaseModel):
+    model:          str
+    prompt:         str
+    video_post_id:  str
+
+
 class ImageGenerationRequest(BaseModel):
     model:           str
     prompt:          str
