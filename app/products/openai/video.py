@@ -119,6 +119,8 @@ class _VideoJob:
             payload["error"] = self.error
         if self.remixed_from_video_id:
             payload["remixed_from_video_id"] = self.remixed_from_video_id
+        if self.video_url:
+            payload["video_url"] = self.video_url
         return payload
 
 
@@ -801,6 +803,7 @@ async def _run_video_job(
 
         path = _save_video_bytes(raw, job.id)
         final_video_url = artifact.video_url
+        final_content_path = str(path)
         cfg = get_config()
         fmt = _normalize_video_format(cfg.get_str("features.video_format", "grok_url"))
         if fmt in ("s3_url", "s3_html"):
@@ -810,6 +813,7 @@ async def _run_video_job(
                 try:
                     s3_url = await store.upload(f"videos/{job.id}.mp4", raw, "video/mp4")
                     final_video_url = s3_url
+                    final_content_path = ""
                     path.unlink(missing_ok=True)
                 except Exception as exc:
                     logger.warning("S3 video job upload failed, keeping local: error={}", exc)
@@ -818,7 +822,7 @@ async def _run_video_job(
             job.progress = 100
             job.completed_at = int(time.time())
             job.video_url = final_video_url
-            job.content_path = str(path)
+            job.content_path = final_content_path
             job.remixed_from_video_id = artifact.remixed_from_video_id
     except Exception as exc:
         logger.exception("video job failed: job_id={} error={}", job.id, exc)
@@ -897,6 +901,7 @@ async def _run_video_extend_job(
 
         path = _save_video_bytes(raw, job.id)
         final_video_url = artifact.video_url
+        final_content_path = str(path)
         cfg = get_config()
         fmt = _normalize_video_format(cfg.get_str("features.video_format", "grok_url"))
         if fmt in ("s3_url", "s3_html"):
@@ -906,6 +911,7 @@ async def _run_video_extend_job(
                 try:
                     s3_url = await store.upload(f"videos/{job.id}.mp4", raw, "video/mp4")
                     final_video_url = s3_url
+                    final_content_path = ""
                     path.unlink(missing_ok=True)
                 except Exception as exc:
                     logger.warning("S3 video extend job upload failed, keeping local: error={}", exc)
@@ -914,7 +920,7 @@ async def _run_video_extend_job(
             job.progress = 100
             job.completed_at = int(time.time())
             job.video_url = final_video_url
-            job.content_path = str(path)
+            job.content_path = final_content_path
     except Exception as exc:
         logger.exception("video extend job failed: job_id={} error={}", job.id, exc)
         async with _VIDEO_JOBS_LOCK:
@@ -928,6 +934,7 @@ async def extend_video(
     prompt: str,
     video_post_id: str,
     seconds: int = 6,
+    original_seconds: int = 6,
     size: str = "1280x720",
     resolution_name: str | None = None,
     preset: str | None = None,

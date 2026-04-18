@@ -429,6 +429,7 @@ async def videos_extend(body: VideoExtendRequest):
         model=body.model,
         prompt=body.prompt,
         video_post_id=body.video_post_id,
+        original_seconds=body.original_seconds,
     )
     return JSONResponse(result)
 
@@ -441,7 +442,13 @@ async def videos_retrieve(video_id: str):
 
 @router.get("/videos/{video_id}/content", tags=[_TAG_VIDEOS], dependencies=[Depends(verify_api_key)])
 async def videos_content(video_id: str):
-    from .video import content_path
+    from fastapi.responses import RedirectResponse
+    from .video import get_video_job, content_path
+    job = await get_video_job(video_id)
+    if job is None:
+        raise ValidationError(f"Video content for {video_id!r} not found", param="video_id")
+    if job.status == "completed" and not job.content_path and job.video_url:
+        return RedirectResponse(url=job.video_url, status_code=302)
     path = await content_path(video_id)
     return FileResponse(path, media_type="video/mp4", filename=f"{video_id}.mp4")
 
