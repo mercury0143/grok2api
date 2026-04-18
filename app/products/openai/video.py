@@ -161,6 +161,17 @@ def _substitute_image_refs(prompt: str, content_urls: list[str]) -> str:
     return _PLACEHOLDER_RE.sub(_replace, prompt)
 
 
+def _asset_id_from_content_url(url: str) -> str:
+    """Extract assetId from https://assets.grok.com/users/{uid}/{assetId}/content"""
+    try:
+        parts = urlparse(url).path.strip("/").split("/")
+        if len(parts) >= 2 and parts[-1] == "content":
+            return parts[-2]
+    except Exception:
+        pass
+    return ""
+
+
 def _build_message(prompt: str, preset: str) -> str:
     return f"{prompt} {_PRESET_FLAGS.get(preset, '--mode=custom')}".strip()
 
@@ -245,9 +256,18 @@ def _video_create_payload(
         resolution_name: str,
         video_length: int,
         preset: str,
-        file_attachments: list[str] | None = None,
+        image_references: list[str] | None = None,
 ) -> dict[str, Any]:
-    payload = {
+    video_config: dict[str, Any] = {
+        "parentPostId": parent_post_id,
+        "aspectRatio": aspect_ratio,
+        "videoLength": video_length,
+        "resolutionName": resolution_name,
+    }
+    if image_references:
+        video_config["isReferenceToVideo"] = True
+        video_config["imageReferences"] = image_references
+    return {
         "temporary": True,
         "modelName": _VIDEO_MODEL_NAME,
         "message": _build_message(prompt, preset),
@@ -256,20 +276,10 @@ def _video_create_payload(
         "responseMetadata": {
             "experiments": [],
             "modelConfigOverride": {
-                "modelMap": {
-                    "videoGenModelConfig": {
-                        "parentPostId": parent_post_id,
-                        "aspectRatio": aspect_ratio,
-                        "videoLength": video_length,
-                        "resolutionName": resolution_name,
-                    }
-                }
+                "modelMap": {"videoGenModelConfig": video_config},
             },
         },
     }
-    if file_attachments:
-        payload["fileAttachments"] = file_attachments
-    return payload
 
 
 def _video_extend_start_time(seconds: int) -> float:
@@ -454,31 +464,31 @@ async def _prepare_video_references(
         references: list[dict[str, Any]],
         prompt: str,
 ) -> tuple[str, list[str]]:
-    """Upload all reference images and resolve @Img/@图片 placeholders in prompt.
+    """Upload reference images and build @{assetId}-substituted prompt.
 
-    Returns (resolved_prompt, post_ids).
-    - If prompt contains @Img{N}/@图片{N}: substitutes content URLs at each placeholder.
-    - If no placeholder and exactly 1 image: prepends URL (backward-compat).
-    - If no placeholder and 2+ images: raises ValidationError.
+    Returns (resolved_prompt, content_urls).
+    - resolved_prompt: @Img1/@图片1 replaced with @{assetId} (matches Grok web app format)
+    - content_urls: passed into videoGenModelConfig.imageReferences
     """
     content_urls: list[str] = []
-    post_ids: list[str] = []
+    ref_tokens: list[str] = []
     for ref in references:
         vr = await _prepare_video_reference(token, ref)
         content_urls.append(vr.content_url)
-        post_ids.append(vr.post_id)
+        asset_id = _asset_id_from_content_url(vr.content_url)
+        ref_tokens.append(f"@{asset_id}" if asset_id else vr.content_url)
 
     has_placeholder = bool(_PLACEHOLDER_RE.search(prompt))
     if has_placeholder:
-        resolved_prompt = _substitute_image_refs(prompt, content_urls)
-    elif len(content_urls) == 1:
-        resolved_prompt = f"{content_urls[0]}  {prompt}"
+        resolved_prompt = _substitute_image_refs(prompt, ref_tokens)
+    elif len(ref_tokens) == 1:
+        resolved_prompt = f"{ref_tokens[0]}  {prompt}"
     else:
         raise ValidationError(
             "prompt must use @Img1/@Img2 or @图片1/@图片2 to reference multiple images",
             param="prompt",
         )
-    return resolved_prompt, post_ids
+    return resolved_prompt, content_urls
 
 
 async def _collect_video_segment(
@@ -643,26 +653,24 @@ async def _generate_video_with_token(
         input_references: list[dict[str, Any]] | None = None,
         progress_cb: Callable[[int], Awaitable[None]] | None = None,
 ) -> _VideoArtifact:
-    resolved_prompt = prompt
-    file_attachments: list[str] | None = None
-
+    image_references: list[str] | None = None
     if input_references:
-        resolved_prompt, post_ids = await _prepare_video_references(token, input_references, prompt)
-        parent_post_id = post_ids[0]
-        file_attachments = post_ids
+        resolved_prompt, image_references = await _prepare_video_references(token, input_references, prompt)
     else:
-        post = await create_media_post(
-            token,
-            media_type=_VIDEO_MEDIA_TYPE,
-            prompt=prompt,
-            referer="https://grok.com/imagine",
-        )
-        post_data = post.get("post")
-        if not isinstance(post_data, dict):
-            raise UpstreamError("Video create-post returned no post payload")
-        parent_post_id = str(post_data.get("id") or "").strip()
-        if not parent_post_id:
-            raise UpstreamError("Video create-post returned no post id")
+        resolved_prompt = prompt
+
+    post = await create_media_post(
+        token,
+        media_type=_VIDEO_MEDIA_TYPE,
+        prompt=resolved_prompt,
+        referer="https://grok.com/imagine",
+    )
+    post_data = post.get("post")
+    if not isinstance(post_data, dict):
+        raise UpstreamError("Video create-post returned no post payload")
+    parent_post_id = str(post_data.get("id") or "").strip()
+    if not parent_post_id:
+        raise UpstreamError("Video create-post returned no post id")
 
     segments = _build_segment_lengths(seconds)
     total_segments = len(segments)
@@ -679,7 +687,7 @@ async def _generate_video_with_token(
                 resolution_name=resolution_name,
                 video_length=segment_length,
                 preset=preset,
-                file_attachments=file_attachments,
+                image_references=image_references,
             )
             referer = "https://grok.com/imagine"
         else:

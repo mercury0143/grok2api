@@ -55,6 +55,12 @@ Grok2API 是一个 FastAPI 网关，将 Grok Web 能力以 OpenAI 兼容和 Anth
 
 **账号池**：账号分层（basic/super/heavy）。`app/dataplane/account/selector.py` 根据模型层级和配额可用性选择账号。配额窗口按模式划分（auto/fast/expert/heavy）。
 
+**账号选择机制**（`app/dataplane/account/__init__.py` `reserve()`）：
+- **默认评分选择**：按健康度(×100)、剩余配额(×25)、并发数(×-20)、失败次数(×-4)、最近使用惩罚(×-15，15秒窗口)综合评分，选最高分账号。
+- **`exclude_tokens`**：排除指定 token 列表，用于重试时跳过失败账号。
+- **`prefer_tags`**：优先选带指定标签的账号子集；若该子集无可用账号则退回全量候选。目前路由层未使用此参数。
+- **无"指定某账号"机制**：当前不支持通过请求头或参数直接锁定某个账号。
+
 **Leader 选举**：只有一个 worker 运行重量级的 `AccountRefreshScheduler`。使用建议性文件锁（`.scheduler.lock`）——Unix 上用 fcntl，Windows 上始终为 leader。
 
 **配置层级**：`config.defaults.toml` → 后端覆盖（TOML/Redis）→ `GROK_*` 环境变量（最高优先级）。变更检测每次请求只调用一次 `stat()`。
