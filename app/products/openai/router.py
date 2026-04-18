@@ -399,15 +399,16 @@ async def videos_create(
     size: Annotated[Literal["480P", "720P", "1080P", "480p", "720p", "1080p"] | None, Form()] = None,
     resolution_name: Annotated[Literal["480p", "720p", "1080p"] | None, Form()] = None,
     preset: Annotated[Literal["fun", "normal", "spicy", "custom"] | None, Form()] = None,
-    input_reference: Annotated[UploadFile | None, File()] = None,
+    input_reference: Annotated[list[UploadFile], File()] = [],
 ):
     from .video import create_video
 
-    reference_payload = None
-    if input_reference is not None:
-        reference_payload = {
-            "image_url": await _upload_to_data_uri(input_reference, param="input_reference"),
-        }
+    reference_payloads: list[dict] | None = None
+    if input_reference:
+        reference_payloads = [
+            {"image_url": await _upload_to_data_uri(f, param=f"input_reference[{i}]")}
+            for i, f in enumerate(input_reference)
+        ]
 
     result = await create_video(
         model=model,
@@ -417,7 +418,7 @@ async def videos_create(
         size=size,
         resolution_name=resolution_name,
         preset=preset,
-        input_reference=reference_payload,
+        input_references=reference_payloads,
     )
     return JSONResponse(result)
 

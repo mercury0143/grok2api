@@ -8,6 +8,7 @@ Supports:
 import asyncio
 import hashlib
 import html
+import re
 import time
 import uuid
 from dataclasses import dataclass
@@ -148,11 +149,20 @@ _VIDEO_JOBS: dict[str, _VideoJob] = {}
 _VIDEO_JOBS_LOCK = asyncio.Lock()
 
 
-def _build_message(prompt: str, preset: str, *, reference_content_url: str | None = None) -> str:
-    message = f"{prompt} {_PRESET_FLAGS.get(preset, '--mode=custom')}".strip()
-    if reference_content_url:
-        return f"{reference_content_url}  {message}"
-    return message
+# Matches @Img1/@img2 and @图片1/@图片2 (1-indexed)
+_PLACEHOLDER_RE = re.compile(r'@(?:[Ii][Mm][Gg]|图片)(\d+)')
+
+
+def _substitute_image_refs(prompt: str, content_urls: list[str]) -> str:
+    """Replace @Img{N}/@图片{N} with the N-th content URL (1-indexed)."""
+    def _replace(m: re.Match) -> str:
+        idx = int(m.group(1)) - 1
+        return content_urls[idx] if 0 <= idx < len(content_urls) else m.group(0)
+    return _PLACEHOLDER_RE.sub(_replace, prompt)
+
+
+def _build_message(prompt: str, preset: str) -> str:
+    return f"{prompt} {_PRESET_FLAGS.get(preset, '--mode=custom')}".strip()
 
 
 def _progress_reason(progress: int) -> str:
@@ -235,13 +245,12 @@ def _video_create_payload(
         resolution_name: str,
         video_length: int,
         preset: str,
-        reference_content_url: str | None = None,
         file_attachments: list[str] | None = None,
 ) -> dict[str, Any]:
     payload = {
         "temporary": True,
         "modelName": _VIDEO_MODEL_NAME,
-        "message": _build_message(prompt, preset, reference_content_url=reference_content_url),
+        "message": _build_message(prompt, preset),
         "toolOverrides": {"videoGen": True},
         "enableSideBySide": True,
         "responseMetadata": {
@@ -440,6 +449,38 @@ async def _prepare_video_reference(token: str, input_reference: dict[str, Any]) 
     return _VideoReference(content_url=content_url, post_id=post_id)
 
 
+async def _prepare_video_references(
+        token: str,
+        references: list[dict[str, Any]],
+        prompt: str,
+) -> tuple[str, list[str]]:
+    """Upload all reference images and resolve @Img/@图片 placeholders in prompt.
+
+    Returns (resolved_prompt, post_ids).
+    - If prompt contains @Img{N}/@图片{N}: substitutes content URLs at each placeholder.
+    - If no placeholder and exactly 1 image: prepends URL (backward-compat).
+    - If no placeholder and 2+ images: raises ValidationError.
+    """
+    content_urls: list[str] = []
+    post_ids: list[str] = []
+    for ref in references:
+        vr = await _prepare_video_reference(token, ref)
+        content_urls.append(vr.content_url)
+        post_ids.append(vr.post_id)
+
+    has_placeholder = bool(_PLACEHOLDER_RE.search(prompt))
+    if has_placeholder:
+        resolved_prompt = _substitute_image_refs(prompt, content_urls)
+    elif len(content_urls) == 1:
+        resolved_prompt = f"{content_urls[0]}  {prompt}"
+    else:
+        raise ValidationError(
+            "prompt must use @Img1/@Img2 or @图片1/@图片2 to reference multiple images",
+            param="prompt",
+        )
+    return resolved_prompt, post_ids
+
+
 async def _collect_video_segment(
         *,
         token: str,
@@ -599,13 +640,16 @@ async def _generate_video_with_token(
         seconds: int,
         preset: str,
         timeout_s: float,
-        input_reference: dict[str, Any] | None = None,
+        input_references: list[dict[str, Any]] | None = None,
         progress_cb: Callable[[int], Awaitable[None]] | None = None,
 ) -> _VideoArtifact:
-    reference: _VideoReference | None = None
-    if input_reference:
-        reference = await _prepare_video_reference(token, input_reference)
-        parent_post_id = reference.post_id
+    resolved_prompt = prompt
+    file_attachments: list[str] | None = None
+
+    if input_references:
+        resolved_prompt, post_ids = await _prepare_video_references(token, input_references, prompt)
+        parent_post_id = post_ids[0]
+        file_attachments = post_ids
     else:
         post = await create_media_post(
             token,
@@ -629,14 +673,13 @@ async def _generate_video_with_token(
     for index, segment_length in enumerate(segments):
         if index == 0:
             payload = _video_create_payload(
-                prompt=prompt,
+                prompt=resolved_prompt,
                 parent_post_id=parent_post_id,
                 aspect_ratio=aspect_ratio,
                 resolution_name=resolution_name,
                 video_length=segment_length,
                 preset=preset,
-                reference_content_url=reference.content_url if reference is not None else None,
-                file_attachments=[reference.post_id] if reference is not None else None,
+                file_attachments=file_attachments,
             )
             referer = "https://grok.com/imagine"
         else:
@@ -684,7 +727,7 @@ async def _run_video_generation(
         resolution_name: str,
         seconds: int,
         preset: str = "custom",
-        input_reference: dict[str, Any] | None = None,
+        input_references: list[dict[str, Any]] | None = None,
         progress_cb: Callable[[int], Awaitable[None]] | None = None,
 ) -> _VideoArtifact:
     async def _runner(token: str, timeout_s: float) -> _VideoArtifact:
@@ -696,7 +739,7 @@ async def _run_video_generation(
             seconds=seconds,
             preset=preset,
             timeout_s=timeout_s,
-            input_reference=input_reference,
+            input_references=input_references,
             progress_cb=progress_cb,
         )
 
@@ -781,7 +824,7 @@ async def _run_video_job(
         prompt: str,
         seconds: int,
         preset: str | None,
-        input_reference: dict[str, Any] | None = None,
+        input_references: list[dict[str, Any]] | None = None,
 ) -> None:
     try:
         await _set_job_status(job, status="in_progress", progress=1)
@@ -819,7 +862,7 @@ async def _run_video_job(
                 seconds=seconds,
                 preset=resolved_preset,
                 timeout_s=timeout_s,
-                input_reference=input_reference,
+                input_references=input_references,
                 progress_cb=_progress,
             )
             raw, _mime = await _download_video_bytes(token, artifact.video_url)
@@ -1063,7 +1106,7 @@ async def create_video(
         aspect_ratio: str | None = None,  # 2:3, 3:2, 1:1, 9:16, 16:9 …
         resolution_name: str | None = None,  # kept for backward compat
         preset: str | None = None,
-        input_reference: dict[str, Any] | None = None,
+        input_references: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     spec = model_registry.get(model)
     if spec is None or not spec.enabled or not spec.is_video():
@@ -1108,7 +1151,7 @@ async def create_video(
             prompt=cleaned_prompt,
             seconds=normalized_seconds,
             preset=preset,
-            input_reference=input_reference,
+            input_references=input_references,
         )
     )
     asyncio.create_task(_expire_video_job(job.id))
@@ -1139,9 +1182,12 @@ async def content_path(video_id: str) -> Path:
     return path
 
 
-def _extract_video_prompt_and_reference(messages: list[dict]) -> tuple[str, dict[str, Any] | None]:
+def _extract_video_prompt_and_references(
+        messages: list[dict],
+) -> tuple[str, list[dict[str, Any]]]:
+    """Extract prompt text and all image_url references from the last user message."""
     prompt = ""
-    reference_url = ""
+    reference_urls: list[str] = []
 
     for msg in reversed(messages):
         content = msg.get("content", "")
@@ -1154,7 +1200,7 @@ def _extract_video_prompt_and_reference(messages: list[dict]) -> tuple[str, dict
             continue
 
         text_parts: list[str] = []
-        block_reference = ""
+        block_refs: list[str] = []
         for item in content:
             if not isinstance(item, dict):
                 continue
@@ -1166,24 +1212,25 @@ def _extract_video_prompt_and_reference(messages: list[dict]) -> tuple[str, dict
             elif item_type == "image_url":
                 image_url = item.get("image_url")
                 if isinstance(image_url, dict):
-                    block_reference = str(image_url.get("url") or "").strip() or block_reference
+                    url = str(image_url.get("url") or "").strip()
                 elif isinstance(image_url, str):
-                    block_reference = image_url.strip() or block_reference
+                    url = image_url.strip()
+                else:
+                    url = ""
+                if url:
+                    block_refs.append(url)
 
         if text_parts:
             prompt = " ".join(text_parts)
-        if block_reference and not reference_url:
-            reference_url = block_reference
+        if block_refs and not reference_urls:
+            reference_urls = block_refs
         if prompt:
             break
 
     if not prompt:
         raise ValidationError("Video prompt cannot be empty", param="messages")
 
-    input_reference: dict[str, Any] | None = None
-    if reference_url:
-        input_reference = {"image_url": reference_url}
-    return prompt, input_reference
+    return prompt, [{"image_url": u} for u in reference_urls]
 
 
 async def completions(
@@ -1207,7 +1254,7 @@ async def completions(
         default="720p",
     )
     resolved_preset = _resolve_video_preset(preset)
-    prompt, input_reference = _extract_video_prompt_and_reference(messages)
+    prompt, input_references = _extract_video_prompt_and_references(messages)
 
     cfg = get_config()
     is_stream = stream if stream is not None else cfg.get_bool("features.stream", False)
@@ -1223,7 +1270,7 @@ async def completions(
                 seconds=resolved_seconds,
                 preset=resolved_preset,
                 timeout_s=timeout_s,
-                input_reference=input_reference,
+                input_references=input_references or None,
                 progress_cb=progress_cb,
             )
             file_id = hashlib.sha1(artifact.video_url.encode("utf-8")).hexdigest()[:32]
