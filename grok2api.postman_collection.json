@@ -1,0 +1,385 @@
+{
+  "info": {
+    "_postman_id": "e06b7bd8-059d-4782-a8ab-aa3328e1da81",
+    "name": "grok2api",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_exporter_id": "10882757"
+  },
+  "item": [
+    {
+      "name": "生图",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\r\n    \"model\": \"grok-imagine-image-lite\",\r\n    \"prompt\": \"a cat\",\r\n    \"n\": 1\r\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{grok2api}}/v1/images/generations",
+          "host": [
+            "{{grok2api}}"
+          ],
+          "path": [
+            "v1",
+            "images",
+            "generations"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "创建视频",
+      "request": {
+        "auth": {
+          "type": "noauth"
+        },
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "multipart/form-data",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "formdata",
+          "formdata": [
+            {
+              "key": "model",
+              "value": "grok-imagine-video",
+              "type": "text",
+              "uuid": "10a82bc3-187e-413f-b4be-d1507d7b861a"
+            },
+            {
+              "key": "prompt",
+              "value": "两只猫在屋顶打架",
+              "type": "text",
+              "uuid": "6cb9b972-5d7f-4bd3-89d2-db0c5a499875"
+            },
+            {
+              "key": "seconds",
+              "value": "6",
+              "type": "text",
+              "uuid": "615a4537-8fae-4ac6-a425-028dbe7f3d27"
+            },
+            {
+              "key": "size",
+              "value": "1280x720",
+              "type": "text",
+              "uuid": "78cafc33-f573-43ae-8af9-0158d9fbba83"
+            }
+          ]
+        },
+        "url": {
+          "raw": "{{grok2api}}/v1/videos",
+          "host": [
+            "{{grok2api}}"
+          ],
+          "path": [
+            "v1",
+            "videos"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "查询任务状态",
+      "request": {
+        "auth": {
+          "type": "noauth"
+        },
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{grok2api}}/v1/videos/video_a008543b51b3431886f5ec200eeaf2e8",
+          "host": [
+            "{{grok2api}}"
+          ],
+          "path": [
+            "v1",
+            "videos",
+            "video_a008543b51b3431886f5ec200eeaf2e8"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "下载视频内容",
+      "request": {
+        "auth": {
+          "type": "noauth"
+        },
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{grok2api}}/v1/videos/video_c68df2b2e96946f8bc636288f44d2976/content",
+          "host": [
+            "{{grok2api}}"
+          ],
+          "path": [
+            "v1",
+            "videos",
+            "video_c68df2b2e96946f8bc636288f44d2976",
+            "content"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "拓展视频",
+      "request": {
+        "auth": {
+          "type": "noauth"
+        },
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\r\n    \"model\": \"grok-imagine-video\",\r\n    \"prompt\": \"让他们大打出手 冲破房顶\",\r\n    \"video_post_id\": \"video_375248f754b04452abb436f737338645\",\r\n    \"original_seconds\": 6\r\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{grok2api}}/v1/videos/extend",
+          "host": [
+            "{{grok2api}}"
+          ],
+          "path": [
+            "v1",
+            "videos",
+            "extend"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "添加token",
+      "request": {
+        "auth": {
+          "type": "noauth"
+        },
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          },
+          {
+            "key": "user-agent",
+            "value": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36 Edg/147.0.0.0",
+            "type": "text"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer grok2api",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\r\n    \"pool\": \"super\",\r\n    \"tokens\": [\r\n        \"eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJzZXNzaW9uX2lkIjoiMjljODdlZjktMzQxZi00MzliLWE1YWYtNTUxZjJlOTNlM2Q0In0.ZZ_G75hSPFmBaBOV7aeVmSECV3Hwet4WXlbli64du_4\"\r\n    ]\r\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{grok2api}}/admin/api/tokens/add",
+          "host": [
+            "{{grok2api}}"
+          ],
+          "path": [
+            "admin",
+            "api",
+            "tokens",
+            "add"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "创建视频 (grok-video-3, 6s, 竖屏)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{api_key}}"
+          }
+        ],
+        "body": {
+          "mode": "formdata",
+          "formdata": [
+            {
+              "key": "model",
+              "value": "grok-video-3",
+              "type": "text"
+            },
+            {
+              "key": "prompt",
+              "value": "猫咪听歌摇头晃脑，下大雨",
+              "type": "text"
+            },
+            {
+              "key": "aspect_ratio",
+              "value": "2:3",
+              "type": "text"
+            },
+            {
+              "key": "size",
+              "value": "720P",
+              "type": "text"
+            }
+          ]
+        },
+        "url": {
+          "raw": "{{grok2api}}/v1/videos",
+          "host": [
+            "{{grok2api}}"
+          ],
+          "path": [
+            "v1",
+            "videos"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "创建视频 (grok-video-3-10s, 10s, 横屏, 1080P)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{api_key}}"
+          }
+        ],
+        "body": {
+          "mode": "formdata",
+          "formdata": [
+            {
+              "key": "model",
+              "value": "grok-video-3-10s",
+              "type": "text"
+            },
+            {
+              "key": "prompt",
+              "value": "日落时分海浪拍打礁石",
+              "type": "text"
+            },
+            {
+              "key": "aspect_ratio",
+              "value": "3:2",
+              "type": "text"
+            },
+            {
+              "key": "size",
+              "value": "1080P",
+              "type": "text"
+            }
+          ]
+        },
+        "url": {
+          "raw": "{{grok2api}}/v1/videos",
+          "host": [
+            "{{grok2api}}"
+          ],
+          "path": [
+            "v1",
+            "videos"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "创建视频 (带参考图)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{api_key}}"
+          }
+        ],
+        "body": {
+          "mode": "formdata",
+          "formdata": [
+            {
+              "key": "model",
+              "value": "grok-video-3",
+              "type": "text"
+            },
+            {
+              "key": "prompt",
+              "value": "@img1 跟雪一起下，然后变成 @img2 ",
+              "type": "text"
+            },
+            {
+              "key": "aspect_ratio",
+              "value": "16:9",
+              "type": "text"
+            },
+            {
+              "key": "size",
+              "value": "720P",
+              "type": "text"
+            },
+            {
+              "key": "input_reference",
+              "type": "file",
+              "src": "/C:/Users/xufus/Desktop/shein-上架/4.png"
+            },
+            {
+              "key": "input_reference",
+              "type": "file",
+              "uuid": "dfb03a68-eb9f-41b7-9787-629016f0ff62",
+              "src": "/C:/Users/xufus/Desktop/shein-上架/white.png"
+            }
+          ]
+        },
+        "url": {
+          "raw": "{{grok2api}}/v1/videos",
+          "host": [
+            "{{grok2api}}"
+          ],
+          "path": [
+            "v1",
+            "videos"
+          ]
+        }
+      },
+      "response": []
+    }
+  ]
+}

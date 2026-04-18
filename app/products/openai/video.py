@@ -148,16 +148,17 @@ class _VideoJob:
 _VIDEO_JOBS: dict[str, _VideoJob] = {}
 _VIDEO_JOBS_LOCK = asyncio.Lock()
 
-
 # Matches @Img1/@img2 and @图片1/@图片2 (1-indexed)
 _PLACEHOLDER_RE = re.compile(r'@(?:[Ii][Mm][Gg]|图片)(\d+)')
 
 
 def _substitute_image_refs(prompt: str, content_urls: list[str]) -> str:
     """Replace @Img{N}/@图片{N} with the N-th content URL (1-indexed)."""
+
     def _replace(m: re.Match) -> str:
         idx = int(m.group(1)) - 1
         return content_urls[idx] if 0 <= idx < len(content_urls) else m.group(0)
+
     return _PLACEHOLDER_RE.sub(_replace, prompt)
 
 
@@ -211,8 +212,8 @@ def _resolve_video_size(size: str) -> tuple[str, str]:
 
 def _resolve_video_resolution_name(value: str | None, *, default: str = "720p") -> str:
     normalized = (value or default).strip().lower()
-    if normalized not in {"480p", "720p", "1080p"}:
-        raise ValidationError("resolution_name must be one of [480p, 720p, 1080p]", param="resolution_name")
+    if normalized not in {"480p", "720p"}:
+        normalized = "720p"
     return normalized
 
 

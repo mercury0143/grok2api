@@ -396,8 +396,8 @@ async def videos_create(
     prompt: Annotated[str, Form(...)],
     seconds: Annotated[int | None, Form()] = None,
     aspect_ratio: Annotated[Literal["2:3", "3:2", "1:1", "9:16", "16:9", "4:3", "3:4"] | None, Form()] = None,
-    size: Annotated[Literal["480P", "720P", "1080P", "480p", "720p", "1080p"] | None, Form()] = None,
-    resolution_name: Annotated[Literal["480p", "720p", "1080p"] | None, Form()] = None,
+    size: Annotated[str | None, Form()] = None,
+    resolution_name: Annotated[str | None, Form()] = None,
     preset: Annotated[Literal["fun", "normal", "spicy", "custom"] | None, Form()] = None,
     input_reference: Annotated[list[UploadFile], File()] = [],
 ):

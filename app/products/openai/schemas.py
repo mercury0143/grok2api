@@ -22,7 +22,7 @@ class ImageConfig(BaseModel):
 class VideoConfig(BaseModel):
     seconds: int | None = 6
     aspect_ratio: Literal["2:3", "3:2", "1:1", "9:16", "16:9", "4:3", "3:4"] | None = None
-    size: Literal["480P", "720P", "1080P", "480p", "720p", "1080p"] | None = None  # quality
+    size: str | None = None  # quality; normalized to 480p/720p internally
     resolution_name: Literal["480p", "720p", "1080p"] | None = None  # backward compat alias
     preset: Literal["fun", "normal", "spicy", "custom"] | None = None
 
