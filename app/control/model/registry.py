@@ -48,6 +48,8 @@ MODELS: tuple[ModelSpec, ...] = (
 
     # Super+
     ModelSpec("grok-imagine-video",                     ModeId.AUTO,   Tier.SUPER, Capability.VIDEO,      True, "Grok Imagine Video"),
+    ModelSpec("grok-video-3",                           ModeId.AUTO,   Tier.SUPER, Capability.VIDEO,      True, "Grok Video 3"),
+    ModelSpec("grok-video-3-10s",                       ModeId.AUTO,   Tier.SUPER, Capability.VIDEO,      True, "Grok Video 3 (10s)"),
 )
 
 # ---------------------------------------------------------------------------

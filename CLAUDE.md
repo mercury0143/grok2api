@@ -107,9 +107,25 @@ Grok2API 是一个 FastAPI 网关，将 Grok Web 能力以 OpenAI 兼容和 Anth
 
 ### Video
 
-| 模型名 | 账号层级 | 说明 |
-|--------|----------|------|
-| `grok-imagine-video` | super+ | 视频生成 / 视频拓展 |
+| 模型名 | 账号层级 | 固定时长 | 说明 |
+|--------|----------|----------|------|
+| `grok-imagine-video` | super+ | — | 视频生成 / 视频拓展 |
+| `grok-video-3`       | super+ | 6s | 6 秒视频生成 |
+| `grok-video-3-10s`   | super+ | 10s | 10 秒视频生成 |
+
+### `/v1/videos` 接口参数（POST multipart/form-data）
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `model` | string | ✓ | 如 `grok-video-3`、`grok-video-3-10s`、`grok-imagine-video` |
+| `prompt` | string | ✓ | 生成提示词 |
+| `aspect_ratio` | string | — | 画面比例：`2:3`、`3:2`、`1:1`、`9:16`、`16:9`、`4:3`、`3:4`；默认 `9:16` |
+| `size` | string | — | 画质：`480P`、`720P`、`1080P`；默认 `720P` |
+| `seconds` | int | — | 视频时长；`grok-video-3` 固定 6s、`grok-video-3-10s` 固定 10s（传值无效） |
+| `input_reference` | file | — | 参考图（二进制文件上传） |
+| `preset` | string | — | 风格：`fun`、`normal`、`spicy`、`custom`；默认 `custom` |
+
+`_ASPECT_RATIO_MAP`（`video.py`）：`2:3→2:3`、`3:2→3:2`、`1:1→1:1`、`9:16→9:16`、`16:9→16:9`、`4:3→16:9`、`3:4→9:16`
 
 ## 配置
 

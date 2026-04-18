@@ -129,7 +129,6 @@ _SSE_HEADERS = {"Cache-Control": "no-cache", "Connection": "keep-alive"}
 
 _VALID_ROLES      = {"developer", "system", "user", "assistant", "tool"}
 _USER_BLOCK_TYPES = {"text", "image_url", "input_audio", "file"}
-_ALLOWED_SIZES    = {"1280x720", "720x1280", "1792x1024", "1024x1792", "1024x1024"}
 _EFFORT_VALUES    = {"none", "minimal", "low", "medium", "high", "xhigh"}
 _LITE_IMAGE_MODELS = {"grok-imagine-image-lite"}
 
@@ -249,14 +248,13 @@ async def chat_completions_endpoint(req: ChatCompletionRequest):
         elif spec.is_video():
             from .video import completions as vid_comp
             vcfg = req.video_config or VideoConfig()
-            from .video import validate_video_length as _validate_video_length
-            _validate_video_length(vcfg.seconds or 6)
             result = await vid_comp(
                 model           = req.model,
                 messages        = messages,
                 stream          = req.stream,
                 seconds         = vcfg.seconds or 6,
-                size            = vcfg.size or "720x1280",
+                aspect_ratio    = vcfg.aspect_ratio,
+                size            = vcfg.size,
                 resolution_name = vcfg.resolution_name,
                 preset          = vcfg.preset,
             )
@@ -396,9 +394,10 @@ async def image_generations(req: ImageGenerationRequest):
 async def videos_create(
     model: Annotated[str, Form(...)],
     prompt: Annotated[str, Form(...)],
-    seconds: Annotated[int, Form()] = 6,
-    size: Annotated[Literal["720x1280", "1280x720", "1024x1024", "1024x1792", "1792x1024"], Form()] = "720x1280",
-    resolution_name: Annotated[Literal["480p", "720p"] | None, Form()] = None,
+    seconds: Annotated[int | None, Form()] = None,
+    aspect_ratio: Annotated[Literal["2:3", "3:2", "1:1", "9:16", "16:9", "4:3", "3:4"] | None, Form()] = None,
+    size: Annotated[Literal["480P", "720P", "1080P", "480p", "720p", "1080p"] | None, Form()] = None,
+    resolution_name: Annotated[Literal["480p", "720p", "1080p"] | None, Form()] = None,
     preset: Annotated[Literal["fun", "normal", "spicy", "custom"] | None, Form()] = None,
     input_reference: Annotated[UploadFile | None, File()] = None,
 ):
@@ -411,10 +410,11 @@ async def videos_create(
         }
 
     result = await create_video(
-        model=model or "grok-video",
+        model=model,
         prompt=prompt,
         seconds=seconds,
-        size=size or "720x1280",
+        aspect_ratio=aspect_ratio,
+        size=size,
         resolution_name=resolution_name,
         preset=preset,
         input_reference=reference_payload,

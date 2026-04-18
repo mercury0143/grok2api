@@ -17,11 +17,6 @@ from urllib.parse import urlparse
 
 import orjson
 
-from app.platform.config.snapshot import get_config
-from app.platform.errors import AppError, ErrorKind, RateLimitError, UpstreamError, ValidationError
-from app.platform.logging.logger import logger
-from app.platform.runtime.clock import now_s
-from app.platform.storage import video_files_dir
 from app.control.account.enums import FeedbackKind
 from app.control.model import registry as model_registry
 from app.control.model.registry import resolve as resolve_model
@@ -37,6 +32,11 @@ from app.dataplane.reverse.transport.asset_upload import (
 )
 from app.dataplane.reverse.transport.assets import download_asset
 from app.dataplane.reverse.transport.media import create_media_post
+from app.platform.config.snapshot import get_config
+from app.platform.errors import AppError, ErrorKind, RateLimitError, UpstreamError, ValidationError
+from app.platform.logging.logger import logger
+from app.platform.runtime.clock import now_s
+from app.platform.storage import video_files_dir
 from ._format import (
     make_chat_response,
     make_response_id,
@@ -59,6 +59,21 @@ _VIDEO_SIZE_MAP: dict[str, tuple[str, str]] = {
     "1024x1024": ("1:1", "720p"),
     "1024x1792": ("9:16", "720p"),
     "1792x1024": ("16:9", "720p"),
+}
+# User-facing aspect ratio → Grok internal aspect ratio
+_ASPECT_RATIO_MAP: dict[str, str] = {
+    "2:3": "2:3",
+    "3:2": "3:2",
+    "1:1": "1:1",
+    "9:16": "9:16",
+    "16:9": "16:9",
+    "4:3": "16:9",
+    "3:4": "9:16",
+}
+# Models with a fixed video length (seconds)
+_MODEL_FIXED_SECONDS: dict[str, int] = {
+    "grok-video-3": 6,
+    "grok-video-3-10s": 10,
 }
 _PRESET_FLAGS = {
     "fun": "--mode=extremely-crazy",
@@ -175,9 +190,18 @@ def _resolve_video_size(size: str) -> tuple[str, str]:
 
 def _resolve_video_resolution_name(value: str | None, *, default: str = "720p") -> str:
     normalized = (value or default).strip().lower()
-    if normalized not in {"480p", "720p"}:
-        raise ValidationError("resolution_name must be one of [480p, 720p]", param="resolution_name")
+    if normalized not in {"480p", "720p", "1080p"}:
+        raise ValidationError("resolution_name must be one of [480p, 720p, 1080p]", param="resolution_name")
     return normalized
+
+
+def _resolve_aspect_ratio(value: str | None, *, default: str = "9:16") -> str:
+    normalized = (value or default).strip()
+    result = _ASPECT_RATIO_MAP.get(normalized)
+    if result is None:
+        allowed = ", ".join(_ASPECT_RATIO_MAP)
+        raise ValidationError(f"aspect_ratio must be one of [{allowed}]", param="aspect_ratio")
+    return result
 
 
 def _resolve_video_preset(value: str | None, *, default: str = "custom") -> str:
@@ -204,15 +228,15 @@ def _build_segment_lengths(seconds: int) -> list[int]:
 
 
 def _video_create_payload(
-    *,
-    prompt: str,
-    parent_post_id: str,
-    aspect_ratio: str,
-    resolution_name: str,
-    video_length: int,
-    preset: str,
-    reference_content_url: str | None = None,
-    file_attachments: list[str] | None = None,
+        *,
+        prompt: str,
+        parent_post_id: str,
+        aspect_ratio: str,
+        resolution_name: str,
+        video_length: int,
+        preset: str,
+        reference_content_url: str | None = None,
+        file_attachments: list[str] | None = None,
 ) -> dict[str, Any]:
     payload = {
         "temporary": True,
@@ -244,15 +268,15 @@ def _video_extend_start_time(seconds: int) -> float:
 
 
 def _video_extend_payload(
-    *,
-    prompt: str,
-    parent_post_id: str,
-    extend_post_id: str,
-    aspect_ratio: str,
-    resolution_name: str,
-    video_length: int,
-    preset: str,
-    start_time_s: float,
+        *,
+        prompt: str,
+        parent_post_id: str,
+        extend_post_id: str,
+        aspect_ratio: str,
+        resolution_name: str,
+        video_length: int,
+        preset: str,
+        start_time_s: float,
 ) -> dict[str, Any]:
     return {
         "temporary": True,
@@ -313,11 +337,11 @@ def _extract_model_response_file_attachments(data: dict[str, Any]) -> list[str]:
 
 
 async def _stream_video_request(
-    token: str,
-    payload: dict[str, Any],
-    *,
-    referer: str,
-    timeout_s: float,
+        token: str,
+        payload: dict[str, Any],
+        *,
+        referer: str,
+        timeout_s: float,
 ) -> AsyncGenerator[str, None]:
     proxy = await get_proxy_runtime()
     lease = await proxy.acquire()
@@ -366,9 +390,9 @@ def _absolutize_video_url(url: str) -> str:
 def _is_upstream_asset_content_url(value: str) -> bool:
     parsed = urlparse(value)
     return (
-        parsed.scheme == "https"
-        and parsed.netloc == "assets.grok.com"
-        and parsed.path.endswith("/content")
+            parsed.scheme == "https"
+            and parsed.netloc == "assets.grok.com"
+            and parsed.path.endswith("/content")
     )
 
 
@@ -417,12 +441,12 @@ async def _prepare_video_reference(token: str, input_reference: dict[str, Any]) 
 
 
 async def _collect_video_segment(
-    *,
-    token: str,
-    payload: dict[str, Any],
-    referer: str,
-    timeout_s: float,
-    progress_cb: Callable[[int], Awaitable[None]] | None = None,
+        *,
+        token: str,
+        payload: dict[str, Any],
+        referer: str,
+        timeout_s: float,
+        progress_cb: Callable[[int], Awaitable[None]] | None = None,
 ) -> _VideoArtifact:
     final_url = ""
     final_asset_id = ""
@@ -430,10 +454,10 @@ async def _collect_video_segment(
     video_post_id = ""
 
     async for line in _stream_video_request(
-        token,
-        payload,
-        referer=referer,
-        timeout_s=timeout_s,
+            token,
+            payload,
+            referer=referer,
+            timeout_s=timeout_s,
     ):
         event_type, data = classify_line(line)
         if event_type == "done":
@@ -567,16 +591,16 @@ async def _resolve_video_output(*, token: str, url: str, file_id: str) -> str:
 
 
 async def _generate_video_with_token(
-    *,
-    token: str,
-    prompt: str,
-    aspect_ratio: str,
-    resolution_name: str,
-    seconds: int,
-    preset: str,
-    timeout_s: float,
-    input_reference: dict[str, Any] | None = None,
-    progress_cb: Callable[[int], Awaitable[None]] | None = None,
+        *,
+        token: str,
+        prompt: str,
+        aspect_ratio: str,
+        resolution_name: str,
+        seconds: int,
+        preset: str,
+        timeout_s: float,
+        input_reference: dict[str, Any] | None = None,
+        progress_cb: Callable[[int], Awaitable[None]] | None = None,
 ) -> _VideoArtifact:
     reference: _VideoReference | None = None
     if input_reference:
@@ -653,15 +677,15 @@ async def _generate_video_with_token(
 
 
 async def _run_video_generation(
-    *,
-    model: str,
-    prompt: str,
-    aspect_ratio: str,
-    resolution_name: str,
-    seconds: int,
-    preset: str = "custom",
-    input_reference: dict[str, Any] | None = None,
-    progress_cb: Callable[[int], Awaitable[None]] | None = None,
+        *,
+        model: str,
+        prompt: str,
+        aspect_ratio: str,
+        resolution_name: str,
+        seconds: int,
+        preset: str = "custom",
+        input_reference: dict[str, Any] | None = None,
+        progress_cb: Callable[[int], Awaitable[None]] | None = None,
 ) -> _VideoArtifact:
     async def _runner(token: str, timeout_s: float) -> _VideoArtifact:
         return await _generate_video_with_token(
@@ -680,9 +704,9 @@ async def _run_video_generation(
 
 
 async def _run_video_with_account(
-    *,
-    model: str,
-    runner: Callable[[str, float], Awaitable[Any]],
+        *,
+        model: str,
+        runner: Callable[[str, float], Awaitable[Any]],
 ) -> Any:
     cfg = get_config()
     timeout_s = cfg.get_float("video.timeout", 180.0)
@@ -750,22 +774,18 @@ def _job_error_payload(message: str) -> dict[str, Any]:
 
 
 async def _run_video_job(
-    job: _VideoJob,
-    *,
-    size: str,
-    resolution_name: str | None,
-    prompt: str,
-    seconds: int,
-    preset: str | None,
-    input_reference: dict[str, Any] | None = None,
+        job: _VideoJob,
+        *,
+        aspect_ratio: str,
+        resolution_name: str,
+        prompt: str,
+        seconds: int,
+        preset: str | None,
+        input_reference: dict[str, Any] | None = None,
 ) -> None:
     try:
         await _set_job_status(job, status="in_progress", progress=1)
-        aspect_ratio, default_resolution_name = _resolve_video_size(size)
-        resolved_resolution_name = _resolve_video_resolution_name(
-            resolution_name,
-            default=default_resolution_name,
-        )
+        resolved_resolution_name = resolution_name
         resolved_preset = _resolve_video_preset(preset)
         spec = resolve_model(job.model)
 
@@ -809,7 +829,8 @@ async def _run_video_job(
             raise
         finally:
             await _acct_dir.release(acct)
-            kind = FeedbackKind.SUCCESS if success else _feedback_kind(fail_exc) if fail_exc else FeedbackKind.SERVER_ERROR
+            kind = FeedbackKind.SUCCESS if success else _feedback_kind(
+                fail_exc) if fail_exc else FeedbackKind.SERVER_ERROR
             await _acct_dir.feedback(token, kind, int(spec.mode_id))
             if success:
                 asyncio.create_task(_quota_sync(token, int(spec.mode_id)))
@@ -849,15 +870,15 @@ async def _run_video_job(
 
 
 async def _run_video_extend_job(
-    job: _VideoJob,
-    *,
-    video_post_id: str,
-    prompt: str,
-    seconds: int,
-    original_seconds: int,
-    aspect_ratio: str,
-    resolution_name: str,
-    preset: str,
+        job: _VideoJob,
+        *,
+        video_post_id: str,
+        prompt: str,
+        seconds: int,
+        original_seconds: int,
+        aspect_ratio: str,
+        resolution_name: str,
+        preset: str,
 ) -> None:
     try:
         await _set_job_status(job, status="in_progress", progress=1)
@@ -938,7 +959,8 @@ async def _run_video_extend_job(
             raise
         finally:
             await _acct_dir.release(acct)
-            kind = FeedbackKind.SUCCESS if success else _feedback_kind(fail_exc) if fail_exc else FeedbackKind.SERVER_ERROR
+            kind = FeedbackKind.SUCCESS if success else _feedback_kind(
+                fail_exc) if fail_exc else FeedbackKind.SERVER_ERROR
             await _acct_dir.feedback(token, kind, int(spec.mode_id))
             if success:
                 asyncio.create_task(_quota_sync(token, int(spec.mode_id)))
@@ -978,15 +1000,15 @@ async def _run_video_extend_job(
 
 
 async def extend_video(
-    *,
-    model: str,
-    prompt: str,
-    video_post_id: str,
-    seconds: int = 6,
-    original_seconds: int = 6,
-    size: str = "1280x720",
-    resolution_name: str | None = None,
-    preset: str | None = None,
+        *,
+        model: str,
+        prompt: str,
+        video_post_id: str,
+        seconds: int = 6,
+        original_seconds: int = 6,
+        size: str = "1280x720",
+        resolution_name: str | None = None,
+        preset: str | None = None,
 ) -> dict[str, Any]:
     spec = model_registry.get(model)
     if spec is None or not spec.enabled or not spec.is_video():
@@ -1033,14 +1055,15 @@ async def extend_video(
 
 
 async def create_video(
-    *,
-    model: str,
-    prompt: str,
-    seconds: str | int | None = None,
-    size: str | None = None,
-    resolution_name: str | None = None,
-    preset: str | None = None,
-    input_reference: dict[str, Any] | None = None,
+        *,
+        model: str,
+        prompt: str,
+        seconds: str | int | None = None,
+        size: str | None = None,  # quality: 720P / 1080P / 480P
+        aspect_ratio: str | None = None,  # 2:3, 3:2, 1:1, 9:16, 16:9 …
+        resolution_name: str | None = None,  # kept for backward compat
+        preset: str | None = None,
+        input_reference: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     spec = model_registry.get(model)
     if spec is None or not spec.enabled or not spec.is_video():
@@ -1050,19 +1073,29 @@ async def create_video(
     if not cleaned_prompt:
         raise ValidationError("prompt cannot be empty", param="prompt")
 
-    normalized_seconds = _coerce_seconds(seconds)
+    # Model-fixed seconds override
+    fixed_secs = _MODEL_FIXED_SECONDS.get(model)
+    if fixed_secs is not None:
+        normalized_seconds = fixed_secs
+    else:
+        normalized_seconds = _coerce_seconds(seconds)
     validate_video_length(normalized_seconds)
-    normalized_size = (size or "720x1280").strip()
-    _aspect_ratio, default_resolution_name = _resolve_video_size(normalized_size)
-    _resolve_video_resolution_name(resolution_name, default=default_resolution_name)
+
+    resolved_aspect_ratio = _resolve_aspect_ratio(aspect_ratio)
+    # size now means quality (720P/1080P); resolution_name kept for compat
+    resolved_resolution = _resolve_video_resolution_name(
+        resolution_name if resolution_name is not None else size,
+        default="720p",
+    )
     _resolve_video_preset(preset)
 
+    quality_label = resolved_resolution  # store quality string in job.size
     job = _VideoJob(
         id=f"video_{uuid.uuid4().hex}",
         model=model,
         prompt=cleaned_prompt,
         seconds=str(normalized_seconds),
-        size=normalized_size,
+        size=quality_label,
         quality=_VIDEO_QUALITY,
         created_at=int(time.time()),
     )
@@ -1070,8 +1103,8 @@ async def create_video(
     asyncio.create_task(
         _run_video_job(
             job,
-            size=normalized_size,
-            resolution_name=resolution_name,
+            aspect_ratio=resolved_aspect_ratio,
+            resolution_name=resolved_resolution,
             prompt=cleaned_prompt,
             seconds=normalized_seconds,
             preset=preset,
@@ -1154,21 +1187,24 @@ def _extract_video_prompt_and_reference(messages: list[dict]) -> tuple[str, dict
 
 
 async def completions(
-    *,
-    model: str,
-    messages: list[dict],
-    stream: bool | None = None,
-    seconds: int = 6,
-    size: str = "720x1280",
-    resolution_name: str | None = None,
-    preset: str | None = None,
+        *,
+        model: str,
+        messages: list[dict],
+        stream: bool | None = None,
+        seconds: int = 6,
+        size: str | None = None,  # quality: 720P / 1080P / 480P
+        aspect_ratio: str | None = None,  # 2:3, 3:2, 1:1, 9:16, 16:9 …
+        resolution_name: str | None = None,
+        preset: str | None = None,
 ) -> dict | AsyncGenerator[str, None]:
     """Chat-completions video support on top of the same core flow."""
-    validate_video_length(seconds)
-    aspect_ratio, default_resolution_name = _resolve_video_size(size)
+    fixed_secs = _MODEL_FIXED_SECONDS.get(model)
+    resolved_seconds = fixed_secs if fixed_secs is not None else seconds
+    validate_video_length(resolved_seconds)
+    resolved_aspect_ratio = _resolve_aspect_ratio(aspect_ratio)
     resolved_resolution_name = _resolve_video_resolution_name(
-        resolution_name,
-        default=default_resolution_name,
+        resolution_name if resolution_name is not None else size,
+        default="720p",
     )
     resolved_preset = _resolve_video_preset(preset)
     prompt, input_reference = _extract_video_prompt_and_reference(messages)
@@ -1182,9 +1218,9 @@ async def completions(
             artifact = await _generate_video_with_token(
                 token=token,
                 prompt=prompt,
-                aspect_ratio=aspect_ratio,
+                aspect_ratio=resolved_aspect_ratio,
                 resolution_name=resolved_resolution_name,
-                seconds=seconds,
+                seconds=resolved_seconds,
                 preset=resolved_preset,
                 timeout_s=timeout_s,
                 input_reference=input_reference,
