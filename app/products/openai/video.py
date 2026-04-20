@@ -485,10 +485,7 @@ async def _prepare_video_references(
     elif len(ref_tokens) == 1:
         resolved_prompt = f"{ref_tokens[0]}  {prompt}"
     else:
-        raise ValidationError(
-            "prompt must use @Img1/@Img2 or @图片1/@图片2 to reference multiple images",
-            param="prompt",
-        )
+        resolved_prompt = prompt
     return resolved_prompt, content_urls
 
 

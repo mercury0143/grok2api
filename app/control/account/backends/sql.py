@@ -36,7 +36,7 @@ metadata = sa.MetaData()
 accounts_table = sa.Table(
     _TBL_ACCOUNTS,
     metadata,
-    sa.Column("token",            sa.String(512), primary_key=True),
+    sa.Column("token",            sa.Text,        primary_key=True),
     sa.Column("pool",             sa.Text,    nullable=False, default="basic"),
     sa.Column("status",           sa.Text,    nullable=False, default="active"),
     sa.Column("created_at",       sa.BigInteger, nullable=False),

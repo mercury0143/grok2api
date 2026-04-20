@@ -138,7 +138,11 @@ Grok2API 是一个 FastAPI 网关，将 Grok Web 能力以 OpenAI 兼容和 Anth
 上传图片后，内部流程与 Grok web app 保持一致：
 
 1. 每张图上传后获得 `content_url`（格式：`https://assets.grok.com/users/{uid}/{assetId}/content`）
-2. `@img1`/`@img2`（或 `@图片1`/`@图片2`）替换为 `@{assetId}`（不是完整 URL）
+2. prompt 中的占位符替换规则（`_prepare_video_references`）：
+   - **1张图 + 无占位符**：自动前置 `@{assetId}  {prompt}`
+   - **多张图 + 有占位符**：`@Img1`/`@img1`/`@图片1` 等替换为对应的 `@{assetId}`（1-indexed，大小写不敏感）
+   - **多张图 + 无占位符**：直接使用原始 prompt，不报错；`imageReferences` 仍传给 Grok，但 prompt 中无引用
+   - 越界占位符（如只传2张图却写了 `@Img3`）：保留原始占位符，Grok 侧收到无效引用
 3. 替换后的 prompt 同时用于：VIDEO media post create 的 `prompt` 字段 和 chat 请求的 `message` 字段
 4. chat 请求的 `videoGenModelConfig` 增加：
    - `isReferenceToVideo: true`
